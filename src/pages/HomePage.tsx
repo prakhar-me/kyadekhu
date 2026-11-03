@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { AdSlot } from '../components/AdSlot';
 import { useAsync } from '../hooks/useAsync';
-import { fetchAdStatus } from '../lib/ads';
+import { ADS_LIVE, fetchAdStatus } from '../lib/ads';
 import { formatINR } from '../lib/adRules';
 import { SearchBar } from '../components/SearchBar';
 import { SurpriseButton } from '../components/SurpriseMe';
@@ -54,6 +54,10 @@ export function HomePage() {
 
 /** This week's paid, approved ad, or the "advertise here" slot with the current bid. */
 function HomeAd() {
+  return ADS_LIVE ? <LiveHomeAd /> : <AdSlot note="Coming soon" />;
+}
+
+function LiveHomeAd() {
   const status = useAsync(() => fetchAdStatus(), []);
   const live = status.data?.live;
   if (live) return <AdSlot text={live.text} linkText={live.brand} href={live.url} />;

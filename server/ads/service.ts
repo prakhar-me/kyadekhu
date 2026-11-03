@@ -28,6 +28,7 @@ import { biddingClosesAt, biddingWeek, isBiddingOpen, weekEndsAt, weekKey } from
 export type AdsEnv = DbEnv &
   MailEnv &
   RazorpayEnv & {
+    VITE_ADS_LIVE?: string;
     ADMIN_PASSWORD?: string;
     ADMIN_EMAIL?: string;
     SITE_URL?: string;
@@ -118,6 +119,9 @@ export interface Result {
 
 export async function placeBid(env: AdsEnv, raw: Record<string, unknown>, ip: string, origin: string, now = new Date()): Promise<Result> {
   const str = (k: string) => (typeof raw[k] === 'string' ? (raw[k] as string).trim() : '');
+  if (env.VITE_ADS_LIVE !== 'true') {
+    return { status: 503, body: { error: 'coming_soon', message: 'Bidding opens soon.' } };
+  }
   if (str('fax')) return { status: 200, body: { ok: true } }; // honeypot
 
   const input = {

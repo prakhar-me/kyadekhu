@@ -1,4 +1,8 @@
 // Client for /api/ads.
+
+/** The auction is switched off ("coming soon") unless VITE_ADS_LIVE=true at build time. */
+export const ADS_LIVE = import.meta.env.VITE_ADS_LIVE === 'true';
+
 export interface AdStatus {
   next: { weekStart: string; label: string; closesAt: string; open: boolean; highest: number | null; minBid: number };
   live: { brand: string; text: string; url: string } | null;

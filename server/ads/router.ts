@@ -79,7 +79,7 @@ export async function handleAdsRequest(req: AdsRequest, env: AdsEnv): Promise<Ad
 export function adsEnvFrom(source: Record<string, string | undefined>): AdsEnv {
   const keys = [
     'DATABASE_URL', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_FROM',
-    'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'ADMIN_PASSWORD', 'ADMIN_EMAIL', 'SITE_URL',
+    'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'VITE_ADS_LIVE', 'ADMIN_PASSWORD', 'ADMIN_EMAIL', 'SITE_URL',
   ] as const;
   return Object.fromEntries(keys.map((k) => [k, source[k]])) as AdsEnv;
 }
