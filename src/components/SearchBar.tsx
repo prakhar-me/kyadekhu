@@ -113,8 +113,8 @@ export function SearchBar({ variant = 'hero', initialValue = '', autoFocus }: Pr
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
-          aria-label="Search a movie, genre, or mood"
-          placeholder="Search a movie, genre, or mood..."
+          aria-label="Name the last movie you loved, or a genre or mood"
+          placeholder="Name the last movie you loved…"
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
