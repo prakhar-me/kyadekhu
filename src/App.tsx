@@ -2,6 +2,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { CrashState, EmptyState } from './components/EmptyState';
 import { Layout } from './components/Layout';
 import { SurpriseProvider } from './components/SurpriseMe';
+import { AdminPage } from './pages/AdminPage';
 import { AdvertisePage } from './pages/AdvertisePage';
 import { HomePage } from './pages/HomePage';
 import { MovieDetailsPage } from './pages/MovieDetailsPage';
@@ -22,6 +23,7 @@ const router = createBrowserRouter([
       { path: '/movie/:id', element: <MovieDetailsPage /> },
       { path: '/watchlist', element: <WatchlistPage /> },
       { path: '/advertise', element: <AdvertisePage /> },
+      { path: '/admin', element: <AdminPage /> },
       { path: '*', element: <EmptyState title="This page doesn’t exist" /> },
     ],
   },

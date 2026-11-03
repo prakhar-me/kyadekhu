@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom';
 import { AdSlot } from '../components/AdSlot';
+import { useAsync } from '../hooks/useAsync';
+import { fetchAdStatus } from '../lib/ads';
+import { formatINR } from '../lib/adRules';
 import { SearchBar } from '../components/SearchBar';
 import { SurpriseButton } from '../components/SurpriseMe';
 
@@ -42,9 +45,19 @@ export function HomePage() {
           <SurpriseButton className="shrink-0 self-start" />
         </div>
         <div className="mx-auto max-w-3xl px-4 pt-16 sm:px-10 sm:pt-24">
-          <AdSlot />
+          <HomeAd />
         </div>
       </div>
     </div>
   );
+}
+
+/** This week's paid, approved ad, or the "advertise here" slot with the current bid. */
+function HomeAd() {
+  const status = useAsync(() => fetchAdStatus(), []);
+  const live = status.data?.live;
+  if (live) return <AdSlot text={live.text} linkText={live.brand} href={live.url} />;
+  const highest = status.data?.next.highest;
+  const note = status.data ? (highest ? `Current bid: ${formatINR(highest)}` : `Bids start at ${formatINR(status.data.next.minBid)}`) : undefined;
+  return <AdSlot note={note} />;
 }

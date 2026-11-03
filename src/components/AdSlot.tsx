@@ -7,6 +7,10 @@ interface Props {
   linkText?: string;
   /** Internal path (e.g. /advertise) or an advertiser's external URL. */
   href?: string;
+  /** Small secondary line under the text, e.g. the current bid. */
+  note?: string;
+  /** Render as a non-interactive preview (used on /advertise). */
+  preview?: boolean;
 }
 
 /**
@@ -18,6 +22,8 @@ export function AdSlot({
   text = 'Your brand could be here. Reach people deciding what to watch tonight.',
   linkText = 'Place your ad',
   href = '/advertise',
+  note,
+  preview,
 }: Props) {
   const external = /^https?:\/\//.test(href);
   const className =
@@ -26,7 +32,10 @@ export function AdSlot({
   const content = (
     <>
       <span className="shrink-0 text-[11px] font-medium uppercase tracking-[0.14em] text-muted">{label}</span>
-      <span className="min-w-0 flex-1">{text}</span>
+      <span className="min-w-0 flex-1 break-words">
+        {text}
+        {note && <span className="mt-0.5 block font-mono text-xs text-faint">{note}</span>}
+      </span>
       <span className="shrink-0 text-ink/80 transition-colors duration-150 group-hover:text-ink">
         {linkText}{' '}
         <span aria-hidden className="inline-block transition-transform duration-150 group-hover:translate-x-[2px]">
@@ -38,7 +47,9 @@ export function AdSlot({
 
   return (
     <aside aria-label={label}>
-      {external ? (
+      {preview ? (
+        <div className={className}>{content}</div>
+      ) : external ? (
         <a href={href} target="_blank" rel="sponsored noopener noreferrer" className={className}>
           {content}
         </a>
