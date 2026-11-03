@@ -54,7 +54,7 @@ export function HomePage() {
 
 /** This week's paid, approved ad, or the "advertise here" slot with the current bid. */
 function HomeAd() {
-  return ADS_LIVE ? <LiveHomeAd /> : <AdSlot note="Coming soon" />;
+  return ADS_LIVE ? <LiveHomeAd /> : <AdSlot />;
 }
 
 function LiveHomeAd() {

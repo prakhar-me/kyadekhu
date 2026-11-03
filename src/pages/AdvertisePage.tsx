@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AdSlot } from '../components/AdSlot';
+import { EnquiryPage } from './EnquiryPage';
 import { useAsync } from '../hooks/useAsync';
 import { AD_TEXT_MAX, BRAND_MAX, EMAIL_RE, MAX_BID, formatINR, isHttpUrl } from '../lib/adRules';
 import { ADS_LIVE, AdsError, fetchAdStatus, submitBid, type AdStatus } from '../lib/ads';
@@ -58,37 +59,7 @@ function countdown(ms: number) {
 }
 
 export function AdvertisePage() {
-  return ADS_LIVE ? <AuctionPage /> : <ComingSoon />;
-}
-
-function ComingSoon() {
-  useEffect(() => {
-    document.title = 'Advertise | Kya Dekhu';
-  }, []);
-
-  return (
-    <div className="page pb-8 pt-10 sm:pt-16">
-      <div className="mx-auto max-w-[520px]">
-        <p className="-rotate-2 font-hand text-[1.75rem] leading-none text-muted sm:text-[2rem]">kya dekhu? for brands</p>
-        <h1 className="display mt-3 text-4xl leading-tight sm:text-5xl">Advertise on Kya Dekhu</h1>
-        <section
-          aria-labelledby="soon-title"
-          className="mt-8 rounded-3xl border border-dashed border-white/[0.13] px-5 py-6 sm:px-6"
-        >
-          <p id="soon-title" className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
-            Coming soon
-          </p>
-          <p className="mt-3 text-[15px] leading-relaxed text-ink/90">
-            Weekly bidding for the homepage slot is going live soon. One sponsored line, seen by people deciding what to watch.
-            The highest bid wins, and you only pay if you win.
-          </p>
-        </section>
-        <Link to="/" className="btn-ghost mt-8">
-          Back to movies
-        </Link>
-      </div>
-    </div>
-  );
+  return ADS_LIVE ? <AuctionPage /> : <EnquiryPage />;
 }
 
 function AuctionPage() {

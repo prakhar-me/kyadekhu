@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv, type Connect, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { adsEnvFrom, handleAdsRequest } from './server/ads/router';
+import { handleEnquiry, type EnquiryEnv } from './server/enquiry';
 import type { AdsEnv } from './server/ads/service';
 import { handleTmdbRequest, type TmdbEnv } from './server/tmdbProxy';
 
@@ -82,6 +83,45 @@ function adsApi(env: AdsEnv): Plugin {
   };
 }
 
+// POST /api/enquiry for the advertiser form, mirroring api/enquiry.ts.
+function enquiryEndpoint(env: EnquiryEnv): Plugin {
+  const middleware: Connect.NextHandleFunction = (req, res, next) => {
+    if (req.url !== '/api/enquiry') return next();
+    const send = (status: number, body: string) => {
+      res.statusCode = status;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(body);
+    };
+    if (req.method !== 'POST') return send(405, '{"error":"method_not_allowed"}');
+    let raw = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk: string) => {
+      raw += chunk;
+      if (raw.length > 20_000) req.destroy();
+    });
+    req.on('end', () => {
+      let body: unknown;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        return send(400, '{"error":"invalid_json"}');
+      }
+      handleEnquiry(body, req.socket.remoteAddress ?? 'unknown', env)
+        .then((r) => send(r.status, r.body))
+        .catch(next);
+    });
+  };
+  return {
+    name: 'enquiry-endpoint',
+    configureServer(server) {
+      server.middlewares.use(middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = { ...process.env, ...loadEnv(mode, process.cwd(), '') };
   return {
@@ -92,6 +132,11 @@ export default defineConfig(({ mode }) => {
         TMDB_API_KEY: env.TMDB_API_KEY,
       }),
       adsApi(adsEnvFrom(env)),
+      enquiryEndpoint({
+        RESEND_API_KEY: env.RESEND_API_KEY,
+        ENQUIRY_TO_EMAIL: env.ENQUIRY_TO_EMAIL,
+        ENQUIRY_FROM_EMAIL: env.ENQUIRY_FROM_EMAIL,
+      }),
     ],
   };
 });
