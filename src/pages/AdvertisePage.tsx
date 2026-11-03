@@ -23,6 +23,42 @@ function validate(v: Values): Errors {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * Web3Forms' free plan only accepts submissions from the browser, and its
+ * access key is public by design, so it is read from a VITE_ variable.
+ * Without it, enquiries go to our own /api/enquiry endpoint (Resend).
+ */
+const WEB3FORMS_KEY = import.meta.env.VITE_WEB3FORMS_ACCESS_KEY?.trim();
+
+function sendViaWeb3Forms(v: Values) {
+  return fetch('https://api.web3forms.com/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      access_key: WEB3FORMS_KEY,
+      subject: `Ad enquiry: ${v.company.trim()} (${v.budget})`,
+      from_name: 'Kya Dekhu',
+      replyto: v.email.trim(),
+      Name: v.name.trim(),
+      Email: v.email.trim(),
+      Company: v.company.trim(),
+      Website: v.website.trim() || '–',
+      'Ad type': v.adType,
+      'Monthly budget': v.budget,
+      'Preferred start': v.startDate || '–',
+      Message: v.message.trim(),
+    }),
+  });
+}
+
+function sendViaApi(v: Values, honeypot: string) {
+  return fetch('/api/enquiry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...v, fax: honeypot }),
+  });
+}
+
 export function AdvertisePage() {
   const [values, setValues] = useState<Values>(EMPTY);
   const [touched, setTouched] = useState<Partial<Record<Field, boolean>>>({});
@@ -63,15 +99,17 @@ export function AdvertisePage() {
       return;
     }
 
+    // Honeypot filled: almost certainly a bot. Look successful, send nothing.
+    if (honeypot) {
+      setStatus('sent');
+      return;
+    }
+
     setStatus('sending');
     try {
-      const res = await fetch('/api/enquiry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...values, fax: honeypot }),
-      });
+      const res = WEB3FORMS_KEY ? await sendViaWeb3Forms(values) : await sendViaApi(values, honeypot);
       const body = await res.json().catch(() => ({}));
-      if (res.ok) {
+      if (res.ok && body.success !== false) {
         setStatus('sent');
         window.scrollTo(0, 0);
         return;
@@ -82,7 +120,8 @@ export function AdvertisePage() {
         const firstServer = ORDER.find((f) => body.errors[f]);
         if (firstServer) document.getElementById(`f-${firstServer}`)?.focus();
       } else {
-        setFormError(body.message ?? 'We couldn’t send your enquiry. Please try again.');
+        console.error('[advertise] enquiry not sent', res.status, body);
+        setFormError('We couldn’t send your enquiry. Please try again later.');
       }
     } catch {
       setStatus('idle');
