@@ -1,5 +1,5 @@
 // Vercel serverless function for the advertiser enquiry form.
-import { handleEnquiry } from '../server/enquiry';
+import { handleEnquiry } from '../server/enquiry.js';
 
 export async function POST(request: Request): Promise<Response> {
   const text = await request.text();

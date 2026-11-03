@@ -1,6 +1,6 @@
 // Vercel serverless function. vercel.json rewrites /api/tmdb/<path> to
 // /api/tmdb?__path=<path>.
-import { handleTmdbRequest } from '../server/tmdbProxy';
+import { handleTmdbRequest } from '../server/tmdbProxy.js';
 
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);

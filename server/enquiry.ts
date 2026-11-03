@@ -5,7 +5,7 @@
  */
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { AD_TYPES, BUDGETS, EMAIL_RE } from '../src/lib/enquiryOptions';
+import { AD_TYPES, BUDGETS, EMAIL_RE } from '../src/lib/enquiryOptions.js';
 
 export interface EnquiryEnv {
   RESEND_API_KEY?: string;
