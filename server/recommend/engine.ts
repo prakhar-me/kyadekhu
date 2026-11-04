@@ -41,6 +41,8 @@ export const W = {
   animationMismatch: -2.5, // animated title for a live-action seed
   liveActionMismatch: -1.0, // live-action title for an animated seed
   crossType: -0.6, // series for a movie seed, or vice versa
+  coRec: 1.6, // recommended by 4+ of the top 8 picks (less for 2–3), scaled by keyword agreement
+  coRecContentFloor: 0.35, // share of the second-hop boost kept with no keyword overlap
   toneKeyword: 0.35, // tone tags ("suspenseful", "excited") count this much of a theme keyword
   // diversity pass
   similarityPenalty: 4, // × keyword Jaccard with the closest already-picked title
@@ -409,8 +411,7 @@ export async function recommend(env: TmdbEnv, type: MediaType, id: number, opts:
   const shortlist = [...top(type, 90), ...top(other, 25)];
 
   // Step B: details for each candidate (one call each), then filter and score.
-  const detailed = await Promise.all(
-    shortlist.map(async (c) => {
+  const fetchDetailed = async (c: Candidate): Promise<Candidate | null> => {
       const raw = await safe(get(`${c.item.type}/${c.item.id}`, { append_to_response: detailsAppend(c.item.type) }), null);
       if (!raw) return null;
       const item = fromDetails(raw, c.item.type);
@@ -422,8 +423,8 @@ export async function recommend(env: TmdbEnv, type: MediaType, id: number, opts:
       }
       if (item.type === 'movie' && raw.status && raw.status !== 'Released') return null;
       return { ...c, item };
-    }),
-  );
+  };
+  const detailed = await Promise.all(shortlist.map(fetchDetailed));
 
   const seedKw = new Set(seedKeywords.map((k) => k.id));
   const seedNorm = Math.sqrt(seedKeywords.reduce((s, k) => s + (idf.get(k.id) ?? avgIdf) ** 2, 0)) || 1;
@@ -433,9 +434,7 @@ export async function recommend(env: TmdbEnv, type: MediaType, id: number, opts:
   seed.writers.forEach((p) => seedPeople.has(p.id) || seedPeople.set(p.id, 'writer'));
   seed.creators.forEach((p) => seedPeople.set(p.id, 'creator'));
 
-  const scored = detailed
-    .filter((c): c is Candidate => c !== null)
-    .map((c) => {
+  const scoreOne = (c: Candidate) => {
       const t = c.item;
       const why: Record<string, number> = {};
       if (c.sources.rec !== undefined) why.rec = W.recBase + W.recRank * Math.max(0, 1 - c.sources.rec / 20);
@@ -497,8 +496,48 @@ export async function recommend(env: TmdbEnv, type: MediaType, id: number, opts:
             .map((k) => k.name.toLowerCase()),
         ),
       ].slice(0, 3);
-      return { c, t, why, score, crewName, castName: sharedCast[0]?.name ?? null, themes };
-    });
+      return { c, t, why, score, kwSim, crewName, castName: sharedCast[0]?.name ?? null, themes, coRefs: [] as string[] };
+  };
+  const isPresent = <T,>(x: T | null): x is T => x !== null;
+  const scored = detailed.filter(isPresent).map(scoreOne);
+
+  // Step C: second-order recommendations. Ask TMDB what the best first-pass
+  // picks are recommended alongside; titles several of them agree on are
+  // likely right even when the seed's own recommendations missed them.
+  const referrers = scored
+    .filter((r) => r.t.type === type)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+  const secondHop = await Promise.all(
+    referrers.map((r) => safe(get(`${type}/${r.t.id}/recommendations`), { results: [] as any[] })),
+  );
+  const coRecs = new Map<string, { raw: any; refs: string[] }>();
+  secondHop.forEach((res, i) =>
+    (res.results ?? []).slice(0, 20).forEach((raw: any) => {
+      if (raw.id === id) return;
+      const key = `${type}:${raw.id}`;
+      const entry = coRecs.get(key) ?? { raw, refs: [] };
+      entry.refs.push(referrers[i].t.title);
+      coRecs.set(key, entry);
+    }),
+  );
+  const known = new Set(scored.map((r) => `${r.t.type}:${r.t.id}`));
+  const fresh = [...coRecs.entries()]
+    .filter(([key, e]) => !known.has(key) && e.refs.length >= 2)
+    .map(([, e]) => ({ item: fromList(e.raw, type), sources: { crew: [] } as Sources, refs: e.refs.length }))
+    .filter(passesBasic)
+    .sort((a, b) => b.refs - a.refs || b.item.voteCount - a.item.voteCount)
+    .slice(0, 15);
+  const freshDetailed = await Promise.all(fresh.map((f) => fetchDetailed({ item: f.item, sources: f.sources })));
+  scored.push(...freshDetailed.filter(isPresent).map(scoreOne));
+  for (const r of scored) {
+    const refs = coRecs.get(`${r.t.type}:${r.t.id}`)?.refs.filter((title) => title !== r.t.title) ?? [];
+    if (refs.length < 2) continue;
+    const contentGate = W.coRecContentFloor + (1 - W.coRecContentFloor) * Math.min(1, r.kwSim / 0.15);
+    r.why.coRec = W.coRec * Math.min(1, (refs.length - 1) / 3) * contentGate;
+    r.score += r.why.coRec;
+    r.coRefs = refs;
+  }
 
   // Diversity: penalise repeats of the same director or collection.
   const diversify = (list: typeof scored) => {
@@ -541,6 +580,7 @@ export async function recommend(env: TmdbEnv, type: MediaType, id: number, opts:
   const reasonFor = (r: (typeof scored)[number]) => {
     const options: [number, string][] = [];
     if (r.why.rec) options.push([r.why.rec, `Popular with fans of ${seedLabel}`]);
+    if (r.why.coRec && r.coRefs.length >= 2) options.push([r.why.coRec, `Fans of ${r.coRefs[0]} and ${r.coRefs[1]} also like this`]);
     if (r.why.keywords && r.themes.length) options.push([r.why.keywords, `Same themes: ${r.themes.join(', ')}`]);
     if (r.why.crew && r.crewName) {
       const text =
@@ -609,7 +649,7 @@ export async function recommend(env: TmdbEnv, type: MediaType, id: number, opts:
     genres: seed.nativeGenreNames.slice(0, 3),
     people: people_,
   };
-  return { seed: seedInfo, results, ...(opts.debug ? { debug: { keywords: keywordGroups.flat().map((k) => k.name), pool: pool.size, scored: scored.length } } : {}) };
+  return { seed: seedInfo, results, ...(opts.debug ? { debug: { keywords: keywordGroups.flat().map((k) => k.name), pool: pool.size, scored: scored.length, secondHop: freshDetailed.filter(isPresent).length } } : {}) };
 }
 
 /* ------------------------------------------------------------------------ */

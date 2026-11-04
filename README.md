@@ -33,6 +33,8 @@ Get credentials at https://www.themoviedb.org/settings/api.
        using TMDB keyword frequencies, and ratings are vote-adjusted. A diversity pass then spreads out
        directors and franchises. Documentaries, shorts, concert films, unreleased and low-vote titles
        are filtered out first.
+    3. **Second hop:** TMDB recommendations of the top 8 picks. Titles that several of them agree on get
+       a boost, scaled by keyword agreement, and strong ones the first pass missed are added.
   - Check quality with `npm run test:recs` (add `-- --why` for score breakdowns, or pass your own seeds).
 - **Caching:** TMDB responses are cached for 24 hours in memory, and also under `data/tmdb-cache`
   locally. Finished recommendation lists are cached for 6 hours.
