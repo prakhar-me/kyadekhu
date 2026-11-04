@@ -8,10 +8,13 @@ import { Poster } from '../components/Poster';
 import { SearchBar } from '../components/SearchBar';
 import { SurpriseButton } from '../components/SurpriseMe';
 import { useAsync } from '../hooks/useAsync';
-import { discover, discoverFromMovie, type DiscoveryResult } from '../lib/discovery';
+import { discover, discoverTitle, type DiscoveryResult } from '../lib/discovery';
 import { languageName, yearOf } from '../lib/format';
 import { getGenres } from '../lib/tmdb';
-import type { Genre, RankedMovie } from '../lib/types';
+import type { CardItem, Genre, MediaType } from '../lib/types';
+
+type Listed = CardItem & { vote_average: number; type?: MediaType };
+type TypeFilter = 'movie' | 'tv' | 'both';
 
 type Sort = 'relevance' | 'rating' | 'newest' | 'oldest';
 interface Filters {
@@ -27,27 +30,38 @@ export function SearchPage() {
   const [params] = useSearchParams();
   const q = params.get('q')?.trim() ?? '';
   const movieId = Number(params.get('movie')) || undefined;
+  const tvId = Number(params.get('tv')) || undefined;
 
   const result = useAsync<DiscoveryResult>(
-    () => (movieId ? discoverFromMovie(movieId) : q ? discover(q) : null),
-    [q, movieId],
+    () => (movieId ? discoverTitle('movie', movieId) : tvId ? discoverTitle('tv', tvId) : q ? discover(q) : null),
+    [q, movieId, tvId],
   );
   const genres = useAsync<Genre[]>(() => getGenres(), []);
   const genreNames = useMemo(() => new Map((genres.data ?? []).map((g) => [g.id, g.name])), [genres.data]);
 
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [typeFilter, setTypeFilter] = useState<TypeFilter | null>(null);
   useEffect(() => {
     setFilters(NO_FILTERS);
-  }, [q, movieId]);
+    setTypeFilter(null);
+  }, [q, movieId, tvId]);
 
   useEffect(() => {
     const data = result.data;
-    if (data?.kind === 'movie') document.title = `Movies like ${data.seed.title} | Kya Dekhu`;
+    if (data?.kind === 'seed') document.title = `Like ${data.seed.title} | Kya Dekhu`;
     else if (data?.kind === 'browse') document.title = `${data.title} movies | Kya Dekhu`;
     else if (q) document.title = `${q} | Kya Dekhu`;
   }, [result.data, q]);
 
-  const movies = result.data && result.data.kind !== 'none' ? result.data.movies : [];
+  const all: Listed[] = result.data && result.data.kind !== 'none' ? result.data.movies : [];
+  const seedType = result.data?.kind === 'seed' ? result.data.seed.type : 'movie';
+  const activeType: TypeFilter = typeFilter ?? seedType;
+  const hasBothTypes = result.data?.kind === 'seed';
+  const movies = hasBothTypes
+    ? activeType === 'both'
+      ? [...all].sort((a, b) => ((b as { score?: number }).score ?? 0) - ((a as { score?: number }).score ?? 0))
+      : all.filter((m) => (m.type ?? 'movie') === activeType)
+    : all;
 
   return (
     <div className="page">
@@ -66,7 +80,7 @@ export function SearchPage() {
           </>
         )}
 
-        {!q && !movieId && (
+        {!q && !movieId && !tvId && (
           <EmptyState title="What are you in the mood for?" action={<SurpriseButton />}>
             Search for a movie you loved, a genre, or a mood like feel-good or mind-bending.
           </EmptyState>
@@ -80,7 +94,7 @@ export function SearchPage() {
           </EmptyState>
         )}
 
-        {result.data?.kind === 'movie' && <SeedHeader result={result.data} />}
+        {result.data?.kind === 'seed' && <SeedHeader result={result.data} />}
         {result.data?.kind === 'browse' && (
           <header className="mb-10 max-w-2xl">
             <p className="text-sm text-muted">Browsing</p>
@@ -90,33 +104,43 @@ export function SearchPage() {
         )}
 
         {result.status === 'success' && result.data.kind !== 'none' && (
-          <Results movies={movies} genreNames={genreNames} filters={filters} setFilters={setFilters} />
+          <>
+            {hasBothTypes && (
+              <TypeToggle value={activeType} onChange={setTypeFilter} counts={{ movie: all.filter((m) => m.type === 'movie').length, tv: all.filter((m) => m.type === 'tv').length }} />
+            )}
+            <Results
+              key={activeType}
+              movies={movies}
+              noun={hasBothTypes ? (activeType === 'tv' ? ['series', 'series'] : activeType === 'both' ? ['title', 'titles'] : ['movie', 'movies']) : ['movie', 'movies']}
+              genreNames={genreNames}
+              filters={filters}
+              setFilters={setFilters}
+            />
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function SeedHeader({ result }: { result: Extract<DiscoveryResult, { kind: 'movie' }> }) {
+function SeedHeader({ result }: { result: Extract<DiscoveryResult, { kind: 'seed' }> }) {
   const { seed, alternatives } = result;
-  const director = seed.credits?.crew.find((c) => c.job === 'Director');
+  const href = `/${seed.type}/${seed.id}`;
   return (
-    <header className="mb-12">
+    <header className="mb-10">
       <div className="flex items-end gap-5 sm:gap-7">
-        <Link to={`/movie/${seed.id}`} className="w-20 shrink-0 rounded-xl sm:w-28">
+        <Link to={href} className="w-20 shrink-0 rounded-xl sm:w-28">
           <Poster path={seed.poster_path} title={seed.title} sizes="112px" eager />
         </Link>
         <div className="min-w-0 pb-1">
           <p className="text-sm text-muted">Because you liked</p>
           <h1 className="mt-1 display text-4xl leading-[1.05] sm:text-6xl">
-            <Link to={`/movie/${seed.id}`} className="hover:text-white">
+            <Link to={href} className="hover:text-white">
               {seed.title}
             </Link>
           </h1>
           <p className="mt-2 text-sm text-muted">
-            {[yearOf(seed.release_date), seed.genres.slice(0, 3).map((g) => g.name).join(', '), director && `Directed by ${director.name}`]
-              .filter(Boolean)
-              .join('. ')}
+            {[seed.type === 'tv' ? 'Series' : '', seed.year, seed.genres.join(', '), seed.people].filter(Boolean).join('. ')}
           </p>
         </div>
       </div>
@@ -124,13 +148,9 @@ function SeedHeader({ result }: { result: Extract<DiscoveryResult, { kind: 'movi
         <p className="mt-6 flex flex-wrap items-center gap-2 text-sm text-faint">
           <span className="mr-1">Not the one you meant?</span>
           {alternatives.map((m) => (
-            <Link
-              key={m.id}
-              to={`/search?movie=${m.id}&q=${encodeURIComponent(m.title)}`}
-              className="pill"
-            >
+            <Link key={`${m.type}-${m.id}`} to={`/search?${m.type}=${m.id}&q=${encodeURIComponent(m.title)}`} className="pill">
               {m.title}
-              {m.release_date ? ` (${yearOf(m.release_date)})` : ''}
+              {m.year ? ` (${m.type === 'tv' ? 'series, ' : ''}${m.year})` : m.type === 'tv' ? ' (series)' : ''}
             </Link>
           ))}
         </p>
@@ -139,13 +159,42 @@ function SeedHeader({ result }: { result: Extract<DiscoveryResult, { kind: 'movi
   );
 }
 
+function TypeToggle({ value, onChange, counts }: { value: TypeFilter; onChange: (t: TypeFilter) => void; counts: { movie: number; tv: number } }) {
+  const options: [TypeFilter, string, number][] = [
+    ['movie', 'Movies', counts.movie],
+    ['tv', 'Series', counts.tv],
+    ['both', 'Both', counts.movie + counts.tv],
+  ];
+  return (
+    <div role="radiogroup" aria-label="Show" className="mb-4 inline-flex rounded-full border border-line p-1">
+      {options.map(([v, label, n]) => (
+        <button
+          key={v}
+          type="button"
+          role="radio"
+          aria-checked={value === v}
+          disabled={n === 0}
+          onClick={() => onChange(v)}
+          className={`h-9 rounded-full px-4 text-sm transition-colors disabled:opacity-40 ${
+            value === v ? 'bg-ink text-bg' : 'text-muted hover:text-ink'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Results({
   movies,
+  noun,
   genreNames,
   filters,
   setFilters,
 }: {
-  movies: RankedMovie[];
+  movies: Listed[];
+  noun: [string, string];
   genreNames: Map<number, string>;
   filters: Filters;
   setFilters: (f: Filters) => void;
@@ -178,7 +227,7 @@ function Results({
       }
       return true;
     });
-    const date = (m: RankedMovie) => m.release_date || '0000';
+    const date = (m: Listed) => m.release_date || '0000';
     if (filters.sort === 'rating') list.sort((a, b) => b.vote_average - a.vote_average);
     if (filters.sort === 'newest') list.sort((a, b) => date(b).localeCompare(date(a)));
     if (filters.sort === 'oldest') list.sort((a, b) => date(a).localeCompare(date(b)));
@@ -241,7 +290,7 @@ function Results({
           </button>
         )}
         <span className="ml-auto font-mono text-xs text-faint" aria-live="polite">
-          {visible.length} {visible.length === 1 ? 'movie' : 'movies'}
+          {visible.length} {visible.length === 1 ? noun[0] : noun[1]}
         </span>
       </div>
 

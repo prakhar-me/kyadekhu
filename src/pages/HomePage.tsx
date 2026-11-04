@@ -6,7 +6,7 @@ import { formatINR } from '../lib/adRules';
 import { SearchBar } from '../components/SearchBar';
 import { SurpriseButton } from '../components/SurpriseMe';
 
-const EXAMPLES = ['Ludo', 'Interstellar', 'Zindagi Na Milegi Dobara', 'Feel-good', 'Mind-bending', 'Thriller'];
+const EXAMPLES = ['Ludo', 'Interstellar', 'Panchayat', 'Breaking Bad', 'Zindagi Na Milegi Dobara', 'Feel-good', 'Mind-bending', 'Thriller'];
 
 export function HomePage() {
   return (

@@ -4,6 +4,7 @@ import type { Review } from '../lib/types';
 
 interface Props {
   reviews: Review[];
+  type?: 'movie' | 'tv';
   movieId: number;
   imdbId: string | null;
   title: string;
@@ -50,8 +51,8 @@ function ReviewItem({ review }: { review: Review }) {
   );
 }
 
-export function ReviewsSection({ reviews, movieId, imdbId, title }: Props) {
-  const tmdbUrl = `https://www.themoviedb.org/movie/${movieId}/reviews`;
+export function ReviewsSection({ reviews, type = 'movie', movieId, imdbId, title }: Props) {
+  const tmdbUrl = `https://www.themoviedb.org/${type}/${movieId}/reviews`;
   const imdbUrl = imdbId ? `https://www.imdb.com/title/${imdbId}/reviews/` : undefined;
 
   return (

@@ -1,4 +1,4 @@
-import type { Genre, Keyword, MovieDetails, MovieSummary, Paged } from './types';
+import type { Genre, Keyword, MovieDetails, MovieSummary, Paged, TvDetails } from './types';
 
 export const REGION = 'IN';
 const LANGUAGE = 'en-US';
@@ -71,15 +71,20 @@ export function tmdb<T>(path: string, params: Params = {}): Promise<T> {
   return request;
 }
 
-export const searchMovies = (query: string, page = 1) =>
-  tmdb<Paged<MovieSummary>>('search/movie', { query, page, include_adult: false, region: REGION });
+export interface MultiResult {
+  id: number;
+  media_type: 'movie' | 'tv' | 'person';
+  title?: string;
+  name?: string;
+  release_date?: string;
+  first_air_date?: string;
+  poster_path: string | null;
+}
+
+export const searchMulti = (query: string) =>
+  tmdb<Paged<MultiResult>>('search/multi', { query, include_adult: false });
 
 export const searchKeyword = (query: string) => tmdb<Paged<Keyword>>('search/keyword', { query });
-
-export const getRecommendations = (id: number, page = 1) =>
-  tmdb<Paged<MovieSummary>>(`movie/${id}/recommendations`, { page });
-
-export const getSimilar = (id: number, page = 1) => tmdb<Paged<MovieSummary>>(`movie/${id}/similar`, { page });
 
 export const discoverMovies = (params: Params) =>
   tmdb<Paged<MovieSummary>>('discover/movie', { include_adult: false, ...params });
@@ -87,6 +92,12 @@ export const discoverMovies = (params: Params) =>
 export const getMovieDetails = (id: number) =>
   tmdb<MovieDetails>(`movie/${id}`, {
     append_to_response: 'videos,reviews,watch/providers,credits,keywords',
+    include_video_language: 'en,hi,null',
+  });
+
+export const getTvDetails = (id: number) =>
+  tmdb<TvDetails>(`tv/${id}`, {
+    append_to_response: 'videos,reviews,watch/providers,aggregate_credits,external_ids',
     include_video_language: 'en,hi,null',
   });
 

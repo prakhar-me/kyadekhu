@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAsync, useDebounce } from '../hooks/useAsync';
 import { MOODS, parseFacets } from '../lib/discovery';
 import { imageUrl, yearOf } from '../lib/format';
-import { searchMovies } from '../lib/tmdb';
+import { searchMulti } from '../lib/tmdb';
+import { TypeBadge } from './MovieCard';
 
 interface Props {
   variant?: 'hero' | 'compact';
@@ -14,7 +15,7 @@ interface Props {
 
 type Suggestion =
   | { kind: 'query'; label: string; hint: string }
-  | { kind: 'movie'; id: number; label: string; year: string; poster: string | null };
+  | { kind: 'title'; type: 'movie' | 'tv'; id: number; label: string; year: string; poster: string | null };
 
 const GENRE_WORDS = ['Comedy', 'Thriller', 'Romance', 'Sci-Fi', 'Drama', 'Horror', 'Action', 'Crime', 'Mystery', 'Animation'];
 
@@ -33,7 +34,7 @@ export function SearchBar({ variant = 'hero', initialValue = '', autoFocus }: Pr
   }, [initialValue]);
 
   const movies = useAsync(
-    () => (debounced.length >= 2 && !parseFacets(debounced) ? searchMovies(debounced) : null),
+    () => (debounced.length >= 2 && !parseFacets(debounced) ? searchMulti(debounced) : null),
     [debounced],
   );
 
@@ -48,13 +49,17 @@ export function SearchBar({ variant = 'hero', initialValue = '', autoFocus }: Pr
     ].slice(0, 2);
     const titles: Suggestion[] =
       movies.status === 'success' && debounced === query
-        ? movies.data.results.slice(0, 6).map((m) => ({
-            kind: 'movie' as const,
-            id: m.id,
-            label: m.title,
-            year: yearOf(m.release_date),
-            poster: m.poster_path,
-          }))
+        ? movies.data.results
+            .filter((m) => m.media_type === 'movie' || m.media_type === 'tv')
+            .slice(0, 6)
+            .map((m) => ({
+              kind: 'title' as const,
+              type: m.media_type as 'movie' | 'tv',
+              id: m.id,
+              label: (m.title ?? m.name) as string,
+              year: yearOf(m.release_date ?? m.first_air_date),
+              poster: m.poster_path,
+            }))
         : [];
     return [...words, ...titles];
   }, [query, debounced, movies.status, movies.data]);
@@ -65,9 +70,9 @@ export function SearchBar({ variant = 'hero', initialValue = '', autoFocus }: Pr
     setOpen(false);
     setActive(-1);
     inputRef.current?.blur();
-    if (s?.kind === 'movie') {
+    if (s?.kind === 'title') {
       setValue(s.label);
-      navigate(`/search?movie=${s.id}&q=${encodeURIComponent(s.label)}`);
+      navigate(`/search?${s.type}=${s.id}&q=${encodeURIComponent(s.label)}`);
     } else {
       const q = s ? s.label : query;
       if (!q) return;
@@ -156,7 +161,7 @@ export function SearchBar({ variant = 'hero', initialValue = '', autoFocus }: Pr
         >
           {suggestions.map((s, i) => (
             <li
-              key={s.kind === 'movie' ? s.id : `q-${s.label}`}
+              key={s.kind === 'title' ? `${s.type}-${s.id}` : `q-${s.label}`}
               id={`${listId}-${i}`}
               role="option"
               aria-selected={i === active}
@@ -165,13 +170,14 @@ export function SearchBar({ variant = 'hero', initialValue = '', autoFocus }: Pr
               onMouseEnter={() => setActive(i)}
               className={`flex cursor-pointer items-center gap-3 rounded-2xl px-3 py-2 ${i === active ? 'bg-raised' : ''}`}
             >
-              {s.kind === 'movie' ? (
+              {s.kind === 'title' ? (
                 <>
                   <span className="h-12 w-8 shrink-0 overflow-hidden rounded-md bg-raised">
                     {s.poster && <img src={imageUrl(s.poster, 'w92')} alt="" loading="lazy" className="h-full w-full object-cover" />}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                  <span className="font-mono text-xs text-faint">{s.year}</span>
+                  <TypeBadge type={s.type} />
+                  <span className="w-9 text-right font-mono text-xs text-faint">{s.year}</span>
                 </>
               ) : (
                 <>

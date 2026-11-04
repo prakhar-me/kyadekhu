@@ -1,8 +1,27 @@
 {
   "rewrites": [
-    { "source": "/api/tmdb/:path*", "destination": "/api/tmdb?__path=:path*" },
-    { "source": "/api/ads/:path*", "destination": "/api/ads?__path=:path*" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/tmdb/:path*",
+      "destination": "/api/tmdb?__path=:path*"
+    },
+    {
+      "source": "/api/ads/:path*",
+      "destination": "/api/ads?__path=:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ],
-  "crons": [{ "path": "/api/ads/tick", "schedule": "35 14 * * *" }]
+  "crons": [
+    {
+      "path": "/api/ads/tick",
+      "schedule": "35 14 * * *"
+    }
+  ],
+  "functions": {
+    "api/discover.ts": {
+      "maxDuration": 60
+    }
+  }
 }

@@ -5,19 +5,26 @@
  * Vercel function in /api.
  */
 
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 
 const ALLOWED_PATHS = [
-  /^search\/(movie|keyword)$/,
-  /^movie\/\d+$/,
+  /^search\/(movie|tv|multi|keyword)$/,
+  /^(movie|tv)\/\d+$/,
   /^movie\/\d+\/(similar|recommendations|videos|reviews|watch\/providers|keywords|credits)$/,
-  /^genre\/movie\/list$/,
-  /^discover\/movie$/,
-  /^trending\/movie\/(day|week)$/,
+  /^tv\/\d+\/(similar|recommendations|videos|reviews|watch\/providers|keywords|aggregate_credits|external_ids)$/,
+  /^genre\/(movie|tv)\/list$/,
+  /^discover\/(movie|tv)$/,
+  /^trending\/(movie|tv|all)\/(day|week)$/,
+  /^collection\/\d+$/,
+  /^person\/\d+\/combined_credits$/,
 ];
 
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 500;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 5000;
 const cache = new Map<string, { expires: number; body: string }>();
 
 export interface TmdbEnv {
@@ -67,8 +74,9 @@ export async function handleTmdbRequest(
   if (query.length > 2000) return json(414, { error: 'query_too_long' });
 
   const cacheKey = `${path}?${query}`;
-  const hit = cache.get(cacheKey);
+  const hit = cache.get(cacheKey) ?? (await readDiskCache(cacheKey));
   if (hit && hit.expires > Date.now()) {
+    cache.set(cacheKey, hit);
     return {
       status: 200,
       body: hit.body,
@@ -109,7 +117,9 @@ export async function handleTmdbRequest(
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  cache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, body });
+  const entry = { expires: Date.now() + CACHE_TTL_MS, body };
+  cache.set(cacheKey, entry);
+  void writeDiskCache(cacheKey, entry);
 
   return {
     status: 200,
@@ -123,7 +133,7 @@ export async function handleTmdbRequest(
  * large share of connections to api.themoviedb.org, so a few quick retries
  * make local development usable on those networks.
  */
-async function fetchWithRetry(url: string, init: RequestInit, attempts = 5): Promise<Response> {
+async function fetchWithRetry(url: string, init: RequestInit, attempts = 8): Promise<Response> {
   for (let i = 1; ; i++) {
     try {
       return await fetch(url, init);
@@ -134,6 +144,32 @@ async function fetchWithRetry(url: string, init: RequestInit, attempts = 5): Pro
   }
 }
 
+/*
+ * Local development only: mirror the cache to data/tmdb-cache so restarts
+ * and repeated test runs don't refetch. Serverless filesystems are skipped.
+ */
+const DISK_CACHE = process.env.VERCEL ? null : join(process.cwd(), 'data', 'tmdb-cache');
+const diskPath = (key: string) => join(DISK_CACHE!, `${createHash('sha1').update(key).digest('hex')}.json`);
+
+async function readDiskCache(key: string): Promise<{ expires: number; body: string } | undefined> {
+  if (!DISK_CACHE) return undefined;
+  try {
+    return JSON.parse(await readFile(diskPath(key), 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeDiskCache(key: string, entry: { expires: number; body: string }) {
+  if (!DISK_CACHE) return;
+  try {
+    await mkdir(DISK_CACHE, { recursive: true });
+    await writeFile(diskPath(key), JSON.stringify(entry));
+  } catch {
+    /* cache is best effort */
+  }
+}
+
 function cacheHeaders() {
-  return { 'Cache-Control': 'public, max-age=600, s-maxage=3600, stale-while-revalidate=86400' };
+  return { 'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400' };
 }

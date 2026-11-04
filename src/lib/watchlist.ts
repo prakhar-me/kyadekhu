@@ -1,10 +1,11 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import type { MovieSummary } from './types';
+import type { CardItem, MediaType } from './types';
 
-export type SavedMovie = Pick<
-  MovieSummary,
-  'id' | 'title' | 'poster_path' | 'release_date' | 'vote_average' | 'overview' | 'original_language'
-> & { genre_ids?: number[]; savedAt: number };
+export type SavedMovie = Required<Pick<CardItem, 'id' | 'title' | 'poster_path' | 'release_date' | 'vote_average' | 'overview' | 'original_language'>> & {
+  type: MediaType;
+  genre_ids?: number[];
+  savedAt: number;
+};
 
 const KEY = 'kd:watchlist:v1';
 const listeners = new Set<() => void>();
@@ -14,7 +15,8 @@ function load(): SavedMovie[] {
   try {
     const raw = localStorage.getItem(KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    // Entries saved before series existed have no type: they're movies.
+    return Array.isArray(parsed) ? parsed.map((m) => ({ ...m, type: m.type === 'tv' ? 'tv' : 'movie' })) : [];
   } catch {
     return [];
   }
@@ -46,26 +48,25 @@ function subscribe(listener: () => void) {
   };
 }
 
-type Saveable = Pick<MovieSummary, 'id' | 'title' | 'poster_path' | 'release_date' | 'vote_average' | 'overview' | 'original_language'> & {
-  genre_ids?: number[];
-  genres?: { id: number }[];
-};
+type Saveable = Omit<CardItem, 'type'> & { type: MediaType; genres?: { id: number }[] };
+const same = (m: { type: MediaType; id: number }, type: MediaType, id: number) => m.type === type && m.id === id;
 
 export function useWatchlist() {
   const list = useSyncExternalStore(subscribe, () => items);
 
-  const has = useCallback((id: number) => list.some((m) => m.id === id), [list]);
+  const has = useCallback((type: MediaType, id: number) => list.some((m) => same(m, type, id)), [list]);
 
   const toggle = useCallback((movie: Saveable) => {
-    if (items.some((m) => m.id === movie.id)) {
-      commit(items.filter((m) => m.id !== movie.id));
+    if (items.some((m) => same(m, movie.type, movie.id))) {
+      commit(items.filter((m) => !same(m, movie.type, movie.id)));
       return false;
     }
     const saved: SavedMovie = {
+      type: movie.type,
       id: movie.id,
       title: movie.title,
       poster_path: movie.poster_path,
-      release_date: movie.release_date,
+      release_date: movie.release_date ?? '',
       vote_average: movie.vote_average,
       overview: movie.overview,
       original_language: movie.original_language,
@@ -76,7 +77,7 @@ export function useWatchlist() {
     return true;
   }, []);
 
-  const remove = useCallback((id: number) => commit(items.filter((m) => m.id !== id)), []);
+  const remove = useCallback((type: MediaType, id: number) => commit(items.filter((m) => !same(m, type, id))), []);
 
   return { list, has, toggle, remove };
 }

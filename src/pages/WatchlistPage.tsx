@@ -31,7 +31,7 @@ export function WatchlistPage() {
       {list.length ? (
         <MovieGrid>
           {list.map((m) => (
-            <MovieCard key={m.id} movie={{ ...m, vote_count: 0, popularity: 0, backdrop_path: null }} genreNames={genreNames} />
+            <MovieCard key={`${m.type}-${m.id}`} movie={m} genreNames={genreNames} />
           ))}
         </MovieGrid>
       ) : (

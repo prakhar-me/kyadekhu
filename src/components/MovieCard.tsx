@@ -1,19 +1,21 @@
 import { Bookmark, BookmarkCheck, Star } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { formatRating, yearOf } from '../lib/format';
-import type { MovieSummary } from '../lib/types';
+import type { CardItem } from '../lib/types';
 import { useWatchlist } from '../lib/watchlist';
 import { Poster } from './Poster';
 
 interface Props {
-  movie: MovieSummary & { reason?: string };
+  movie: CardItem;
   genreNames?: Map<number, string>;
   eager?: boolean;
 }
 
 export function MovieCard({ movie, genreNames, eager }: Props) {
   const { has, toggle } = useWatchlist();
-  const saved = has(movie.id);
+  const type = movie.type ?? 'movie';
+  const href = `/${type}/${movie.id}`;
+  const saved = has(type, movie.id);
   const year = yearOf(movie.release_date);
   const genres = (movie.genre_ids ?? [])
     .map((id) => genreNames?.get(id))
@@ -23,7 +25,7 @@ export function MovieCard({ movie, genreNames, eager }: Props) {
 
   return (
     <article className="group relative flex flex-col">
-      <Link to={`/movie/${movie.id}`} className="block rounded-xl" aria-label={`${movie.title}${year ? ` (${year})` : ''}`}>
+      <Link to={href} className="block rounded-xl" aria-label={`${movie.title}${year ? ` (${year})` : ''}`}>
         <Poster
           path={movie.poster_path}
           title={movie.title}
@@ -34,7 +36,7 @@ export function MovieCard({ movie, genreNames, eager }: Props) {
 
       <button
         type="button"
-        onClick={() => toggle(movie)}
+        onClick={() => toggle({ ...movie, type })}
         aria-pressed={saved}
         aria-label={saved ? `Remove ${movie.title} from watchlist` : `Save ${movie.title} to watchlist`}
         title={saved ? 'Remove from watchlist' : 'Save to watchlist'}
@@ -47,11 +49,12 @@ export function MovieCard({ movie, genreNames, eager }: Props) {
 
       <div className="mt-3 flex flex-1 flex-col">
         <h3 className="text-[1.05rem] font-semibold leading-snug tracking-[-0.03em]">
-          <Link to={`/movie/${movie.id}`} className="hover:text-white">
+          <Link to={href} className="hover:text-white">
             {movie.title}
           </Link>
         </h3>
         <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] text-muted">
+          <TypeBadge type={type} />
           {year && <span className="font-mono text-xs">{year}</span>}
           {genres && <span className="truncate">{genres}</span>}
           <span className="inline-flex items-center gap-1 font-mono text-xs text-ink">
@@ -64,5 +67,13 @@ export function MovieCard({ movie, genreNames, eager }: Props) {
         {movie.reason && <p className="mt-2 border-l border-white/20 pl-2 text-[13px] leading-snug text-ink/70">{movie.reason}</p>}
       </div>
     </article>
+  );
+}
+
+export function TypeBadge({ type }: { type: 'movie' | 'tv' }) {
+  return (
+    <span className="rounded-full border border-line px-1.5 py-px text-[10px] font-medium uppercase leading-4 tracking-[0.08em] text-muted">
+      {type === 'tv' ? 'Series' : 'Movie'}
+    </span>
   );
 }

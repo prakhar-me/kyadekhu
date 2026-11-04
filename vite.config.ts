@@ -3,12 +3,24 @@ import react from '@vitejs/plugin-react';
 import { adsEnvFrom, handleAdsRequest } from './server/ads/router';
 import { handleEnquiry, type EnquiryEnv } from './server/enquiry';
 import type { AdsEnv } from './server/ads/service';
+import { handleDiscover } from './server/recommend/handler';
 import { handleTmdbRequest, type TmdbEnv } from './server/tmdbProxy';
 
 // Serves /api/tmdb/* from the dev and preview servers so the TMDB key stays
 // on the server, mirroring the Vercel function in /api.
 function tmdbProxy(env: TmdbEnv): Plugin {
   const middleware: Connect.NextHandleFunction = (req, res, next) => {
+    if (req.url?.startsWith('/api/discover') && req.method === 'GET') {
+      const url = new URL(req.url, 'http://localhost');
+      handleDiscover(url.searchParams, env)
+        .then((r) => {
+          res.statusCode = r.status;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.end(r.body);
+        })
+        .catch(next);
+      return;
+    }
     if (!req.url?.startsWith('/api/tmdb/') || req.method !== 'GET') return next();
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname.slice('/api/tmdb/'.length);

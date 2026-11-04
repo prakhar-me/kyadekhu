@@ -1,14 +1,6 @@
 import { normalize } from './format';
-import {
-  discoverMovies,
-  getGenres,
-  getMovieDetails,
-  getRecommendations,
-  getSimilar,
-  searchKeyword,
-  searchMovies,
-} from './tmdb';
-import type { Genre, MovieDetails, MovieSummary, RankedMovie } from './types';
+import { ApiError, discoverMovies, getGenres, searchKeyword } from './tmdb';
+import type { Alternative, Genre, MediaType, MovieSummary, RankedMovie, Recommendation, SeedInfo } from './types';
 
 /* ------------------------------------------------------------------------ */
 /* Query vocabulary                                                          */
@@ -191,7 +183,7 @@ export function parseFacets(query: string): ParsedFacets | null {
 /* ------------------------------------------------------------------------ */
 
 export type DiscoveryResult =
-  | { kind: 'movie'; seed: MovieDetails; alternatives: MovieSummary[]; movies: RankedMovie[] }
+  | { kind: 'seed'; seed: SeedInfo; alternatives: Alternative[]; movies: Recommendation[] }
   | { kind: 'browse'; title: string; blurb: string; movies: RankedMovie[] }
   | { kind: 'none' };
 
@@ -217,71 +209,6 @@ function qualityAdjustment(m: MovieSummary) {
   else if (m.vote_count < 100) s -= 0.4;
   if (!m.poster_path) s -= 1;
   return s;
-}
-
-const listNames = (names: string[]) =>
-  names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-
-/** Movies similar to a specific title, blended from several TMDB signals. */
-export async function discoverFromMovie(seedId: number, alternatives: MovieSummary[] = []): Promise<DiscoveryResult> {
-  const [seed, genres] = await Promise.all([getMovieDetails(seedId), getGenres().catch(() => [] as Genre[])]);
-  const genreName = new Map(genres.map((g) => [g.id, g.name]));
-  const seedGenres = new Set(seed.genres.map((g) => g.id));
-  const director = seed.credits?.crew.find((c) => c.job === 'Director');
-  const leads = (seed.credits?.cast ?? []).slice(0, 2);
-  const keywordIds = (seed.keywords?.keywords ?? []).slice(0, 6).map((k) => k.id);
-  const primaryGenre = seed.genres[0]?.id;
-
-  const [recs, similar, byDirector, byThemes, ...byCast] = await Promise.allSettled([
-    getRecommendations(seedId),
-    getSimilar(seedId),
-    director ? discoverMovies({ with_crew: director.id, sort_by: 'vote_count.desc' }) : Promise.resolve(undefined),
-    keywordIds.length
-      ? discoverMovies({
-          with_keywords: keywordIds.join('|'),
-          with_genres: primaryGenre,
-          sort_by: 'vote_count.desc',
-          'vote_count.gte': 50,
-        })
-      : Promise.resolve(undefined),
-    ...leads.map((c) => discoverMovies({ with_cast: c.id, sort_by: 'popularity.desc', 'vote_count.gte': 20 })),
-  ]);
-
-  const buckets = new Map<number, Bucket>();
-  collect(buckets, settled(recs)?.results, 'rec', 3);
-  collect(buckets, settled(similar)?.results, 'similar', 1.4);
-  collect(buckets, settled(byDirector)?.results, 'director', 2.4, false);
-  collect(buckets, settled(byThemes)?.results, 'themes', 1.6);
-  byCast.forEach((r, i) => collect(buckets, settled(r)?.results, `cast:${i}`, 1.3, false));
-  buckets.delete(seedId);
-
-  if (buckets.size === 0 && [recs, similar].every((r) => r.status === 'rejected')) {
-    throw (recs as PromiseRejectedResult).reason;
-  }
-
-  const movies: RankedMovie[] = [...buckets.values()].map(({ movie, score, tags }) => {
-    const shared = (movie.genre_ids ?? []).filter((g) => seedGenres.has(g));
-    score += seedGenres.size ? (shared.length / seedGenres.size) * 1.6 : 0;
-    if (seedGenres.size && shared.length === 0) score -= 0.8;
-    // Regional films: viewers usually want more from the same industry.
-    if (movie.original_language === seed.original_language) score += seed.original_language === 'en' ? 0.5 : 1.3;
-    score += qualityAdjustment(movie);
-
-    const castHit = leads.find((_, i) => tags.has(`cast:${i}`));
-    let lead: string;
-    if (tags.has('director') && director) lead = `Also directed by ${director.name}.`;
-    else if (castHit) lead = `Also stars ${castHit.name}.`;
-    else if (tags.has('rec')) lead = `Loved by fans of ${seed.title}.`;
-    else if (tags.has('themes')) lead = `Similar themes to ${seed.title}.`;
-    else lead = `Similar to ${seed.title}.`;
-    const sharedNames = shared.map((g) => genreName.get(g)).filter(Boolean) as string[];
-    const reason = sharedNames.length ? `${lead} Shares ${listNames(sharedNames.slice(0, 2))}.` : lead;
-
-    return { ...movie, score, reason };
-  });
-
-  movies.sort((a, b) => b.score - a.score);
-  return { kind: 'movie', seed, alternatives, movies: movies.slice(0, 48) };
 }
 
 async function resolveKeywords(names: string[]) {
@@ -360,29 +287,26 @@ export async function discoverByFacets(facets: ParsedFacets): Promise<DiscoveryR
   return { kind: 'browse', title: title[0].toUpperCase() + title.slice(1), blurb, movies: movies.slice(0, 48) };
 }
 
-/** Pick the most likely intended title from search results. */
-export function bestMatch(query: string, results: MovieSummary[]): MovieSummary | undefined {
-  const q = normalize(query.replace(/\(\d{4}\)/, ''));
-  const year = query.match(/\b(19|20)\d{2}\b/)?.[0];
-  const exact = results.filter(
-    (m) => normalize(m.title) === q || normalize(m.original_title ?? '') === q || (year && normalize(`${m.title} ${year}`) === normalize(query)),
-  );
-  const pool = exact.length ? exact : results.slice(0, 3);
-  const yearMatch = year ? pool.find((m) => m.release_date?.startsWith(year)) : undefined;
-  if (yearMatch) return yearMatch;
-  return [...pool].sort((a, b) => b.vote_count - a.vote_count)[0];
-}
-
-/** Turn a free-text query into results: genre/mood browse, or similar-to-title. */
+/** Turn a free-text query into results: genre/mood browse, or titles like the one named. */
 export async function discover(query: string): Promise<DiscoveryResult> {
   const facets = parseFacets(query);
   if (facets) return discoverByFacets(facets);
+  return fetchRecommendations({ q: query });
+}
 
-  const search = await searchMovies(query.replace(/\b(19|20)\d{2}\b/, '').trim() || query);
-  const match = bestMatch(query, search.results);
-  if (!match) return { kind: 'none' };
-  const alternatives = search.results.filter((m) => m.id !== match.id && m.poster_path).slice(0, 6);
-  return discoverFromMovie(match.id, alternatives);
+export const discoverTitle = (type: MediaType, id: number) => fetchRecommendations({ type, id: String(id) });
+
+async function fetchRecommendations(params: Record<string, string>): Promise<DiscoveryResult> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/discover?${new URLSearchParams(params)}`);
+  } catch {
+    throw new ApiError('Could not connect. Check your internet connection and try again.', 0, 'network');
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(body.message ?? 'Couldn’t load recommendations. Please try again.', res.status, body.error);
+  if (body.kind === 'none') return { kind: 'none' };
+  return { kind: 'seed', seed: body.seed, alternatives: body.alternatives ?? [], movies: body.results ?? [] };
 }
 
 /** A random, well-liked movie. Leans towards Indian cinema a third of the time. */

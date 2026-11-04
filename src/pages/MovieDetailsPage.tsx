@@ -9,14 +9,119 @@ import { StreamingProviders } from '../components/StreamingProviders';
 import { pickTrailer, TrailerPlayer } from '../components/TrailerPlayer';
 import { useAsync } from '../hooks/useAsync';
 import { backdropSrcSet, formatRating, formatRuntime, imageUrl, languageName, yearOf } from '../lib/format';
-import { ApiError, getMovieDetails, REGION } from '../lib/tmdb';
+import { ApiError, getMovieDetails, getTvDetails, REGION } from '../lib/tmdb';
+import type { Genre, MediaType, MovieDetails, RegionProviders, Review, TvDetails, Video } from '../lib/types';
 import { useWatchlist } from '../lib/watchlist';
 
-export function MovieDetailsPage() {
+/** What the page shows, built from either a movie or a series. */
+interface TitleView {
+  type: MediaType;
+  id: number;
+  title: string;
+  year: string;
+  tagline: string | null;
+  overview: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  genres: Genre[];
+  facts: string[];
+  vote_average: number;
+  vote_count: number;
+  imdbId: string | null;
+  people: { label: string; names: string[] }[];
+  videos: Video[];
+  reviews: Review[];
+  region: RegionProviders | undefined;
+  saveable: { type: MediaType; id: number; title: string; poster_path: string | null; release_date: string; vote_average: number; overview: string; original_language: string; genre_ids: number[] };
+}
+
+const languageOf = (code: string, spoken: { iso_639_1: string; english_name: string }[]) =>
+  spoken.find((l) => l.iso_639_1 === code)?.english_name ?? languageName(code);
+
+function fromMovie(m: MovieDetails): TitleView {
+  const director = m.credits?.crew.find((c) => c.job === 'Director');
+  return {
+    type: 'movie',
+    id: m.id,
+    title: m.title,
+    year: yearOf(m.release_date),
+    tagline: m.tagline,
+    overview: m.overview,
+    poster_path: m.poster_path,
+    backdrop_path: m.backdrop_path,
+    genres: m.genres,
+    facts: [yearOf(m.release_date), formatRuntime(m.runtime), languageOf(m.original_language, m.spoken_languages)].filter(Boolean),
+    vote_average: m.vote_average,
+    vote_count: m.vote_count,
+    imdbId: m.imdb_id,
+    people: [
+      ...(director ? [{ label: 'Directed by', names: [director.name] }] : []),
+      { label: 'Starring', names: (m.credits?.cast ?? []).slice(0, 4).map((c) => c.name) },
+    ],
+    videos: m.videos?.results ?? [],
+    reviews: m.reviews?.results ?? [],
+    region: m['watch/providers']?.results?.[REGION],
+    saveable: { ...m, type: 'movie', release_date: m.release_date ?? '', genre_ids: m.genres.map((g) => g.id) },
+  };
+}
+
+function fromTv(t: TvDetails): TitleView {
+  const start = yearOf(t.first_air_date);
+  const ended = !t.in_production && (t.status === 'Ended' || t.status === 'Canceled');
+  const end = ended ? yearOf(t.last_air_date ?? '') : 'Ongoing';
+  const years = start ? (end && end !== start ? `${start} to ${end}` : ended ? start : `${start} to Ongoing`) : '';
+  const runtime = t.episode_run_time?.[0] ?? t.last_episode_to_air?.runtime ?? null;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  return {
+    type: 'tv',
+    id: t.id,
+    title: t.name,
+    year: start,
+    tagline: t.tagline || null,
+    overview: t.overview,
+    poster_path: t.poster_path,
+    backdrop_path: t.backdrop_path,
+    genres: t.genres,
+    facts: [
+      years,
+      t.number_of_seasons ? `${plural(t.number_of_seasons, 'season')}, ${plural(t.number_of_episodes, 'episode')}` : '',
+      runtime ? `${formatRuntime(runtime)} episodes` : '',
+      languageOf(t.original_language, t.spoken_languages),
+    ].filter(Boolean),
+    vote_average: t.vote_average,
+    vote_count: t.vote_count,
+    imdbId: t.external_ids?.imdb_id ?? null,
+    people: [
+      ...(t.created_by.length ? [{ label: 'Created by', names: t.created_by.map((c) => c.name) }] : []),
+      ...(t.networks.length ? [{ label: 'On', names: t.networks.slice(0, 2).map((n) => n.name) }] : []),
+      { label: 'Starring', names: (t.aggregate_credits?.cast ?? []).slice(0, 4).map((c) => c.name) },
+    ],
+    videos: t.videos?.results ?? [],
+    reviews: t.reviews?.results ?? [],
+    region: t['watch/providers']?.results?.[REGION],
+    saveable: {
+      type: 'tv',
+      id: t.id,
+      title: t.name,
+      poster_path: t.poster_path,
+      release_date: t.first_air_date ?? '',
+      vote_average: t.vote_average,
+      overview: t.overview,
+      original_language: t.original_language,
+      genre_ids: t.genres.map((g) => g.id),
+    },
+  };
+}
+
+const loadTitle = (type: MediaType, id: number): Promise<TitleView> =>
+  type === 'tv' ? getTvDetails(id).then(fromTv) : getMovieDetails(id).then(fromMovie);
+
+export function MovieDetailsPage({ type = 'movie' }: { type?: MediaType }) {
   const { id } = useParams();
   const movieId = Number(id);
   const navigate = useNavigate();
-  const details = useAsync(() => (movieId ? getMovieDetails(movieId) : null), [movieId]);
+  const details = useAsync(() => (movieId ? loadTitle(type, movieId) : null), [type, movieId]);
+  const noun = type === 'tv' ? 'Series' : 'Movie';
   const { has, toggle } = useWatchlist();
   const [backdropLoaded, setBackdropLoaded] = useState(false);
 
@@ -24,15 +129,15 @@ export function MovieDetailsPage() {
     setBackdropLoaded(false);
   }, [movieId]);
   useEffect(() => {
-    if (details.data) document.title = `${details.data.title} (${yearOf(details.data.release_date)}) | Kya Dekhu`;
+    if (details.data) document.title = `${details.data.title} (${details.data.year}) | Kya Dekhu`;
   }, [details.data]);
 
-  if (!movieId) return <EmptyState title="Movie not found" />;
+  if (!movieId) return <EmptyState title={`${noun} not found`} />;
   if (details.status === 'error') {
     if (details.error instanceof ApiError && details.error.status === 404) {
       return (
-        <EmptyState title="Movie not found" action={<Link to="/" className="btn-ghost">Search again</Link>}>
-          TMDB has no movie with this ID.
+        <EmptyState title={`${noun} not found`} action={<Link to="/" className="btn-ghost">Search again</Link>}>
+          TMDB has no {noun.toLowerCase()} with this ID.
         </EmptyState>
       );
     }
@@ -41,13 +146,9 @@ export function MovieDetailsPage() {
   if (!details.data) return <DetailsSkeleton />;
 
   const movie = details.data;
-  const saved = has(movie.id);
-  const director = movie.credits?.crew.find((c) => c.job === 'Director');
-  const cast = (movie.credits?.cast ?? []).slice(0, 4).map((c) => c.name);
-  const trailer = pickTrailer(movie.videos?.results);
-  const region = movie['watch/providers']?.results?.[REGION];
-  const language = movie.spoken_languages.find((l) => l.iso_639_1 === movie.original_language)?.english_name ?? languageName(movie.original_language);
-  const facts = [yearOf(movie.release_date), formatRuntime(movie.runtime), language].filter(Boolean);
+  const saved = has(movie.type, movie.id);
+  const trailer = pickTrailer(movie.videos);
+  const people = movie.people.filter((p) => p.names.length);
 
   return (
     <article>
@@ -85,7 +186,7 @@ export function MovieDetailsPage() {
             <h1 className="display text-[2.6rem] leading-[1] sm:text-6xl lg:text-7xl">{movie.title}</h1>
             {movie.tagline && <p className="mt-3 -ml-0.5 font-hand text-[1.9rem] leading-none text-ink/75 sm:text-4xl">{movie.tagline}</p>}
             <p className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-muted sm:text-[13px]">
-              {facts.map((f) => (
+              {movie.facts.map((f) => (
                 <span key={f}>{f}</span>
               ))}
               <span className="inline-flex items-center gap-1.5 text-ink" title={`${movie.vote_count.toLocaleString('en-IN')} votes on TMDB`}>
@@ -93,8 +194,8 @@ export function MovieDetailsPage() {
                 {formatRating(movie.vote_average)}
                 <span className="font-sans text-muted">TMDB</span>
               </span>
-              {movie.imdb_id && (
-                <a href={`https://www.imdb.com/title/${movie.imdb_id}/`} target="_blank" rel="noopener noreferrer" className="text-link font-sans">
+              {movie.imdbId && (
+                <a href={`https://www.imdb.com/title/${movie.imdbId}/`} target="_blank" rel="noopener noreferrer" className="text-link font-sans">
                   IMDb page
                 </a>
               )}
@@ -119,18 +220,21 @@ export function MovieDetailsPage() {
               <p className="max-w-[62ch] text-xl font-medium leading-[1.45] tracking-[-0.03em] text-ink/90 sm:text-[1.45rem]">
                 {movie.overview || 'No synopsis available yet.'}
               </p>
-              {(director || cast.length > 0) && (
+              {people.length > 0 && (
                 <p className="mt-5 max-w-[62ch] text-[15px] text-muted">
-                  {director && <>Directed by <span className="text-ink">{director.name}</span>. </>}
-                  {cast.length > 0 && <>Starring <span className="text-ink">{cast.join(', ')}</span>.</>}
+                  {people.map((p) => (
+                    <span key={p.label}>
+                      {p.label} <span className="text-ink">{p.names.join(', ')}</span>.{' '}
+                    </span>
+                  ))}
                 </p>
               )}
               <div className="mt-7 flex flex-wrap gap-3">
-                <Link to={`/search?movie=${movie.id}&q=${encodeURIComponent(movie.title)}`} className="btn-primary">
+                <Link to={`/search?${movie.type}=${movie.id}&q=${encodeURIComponent(movie.title)}`} className="btn-primary">
                   <Sparkles size={16} aria-hidden />
-                  Find movies like this
+                  {movie.type === 'tv' ? 'Find series like this' : 'Find movies like this'}
                 </Link>
-                <button type="button" onClick={() => toggle(movie)} className="btn-ghost" aria-pressed={saved}>
+                <button type="button" onClick={() => toggle(movie.saveable)} className="btn-ghost" aria-pressed={saved}>
                   {saved ? <BookmarkCheck size={16} className="text-accent" aria-hidden /> : <Bookmark size={16} aria-hidden />}
                   {saved ? 'Saved to watchlist' : 'Save to watchlist'}
                 </button>
@@ -144,11 +248,11 @@ export function MovieDetailsPage() {
               <TrailerPlayer video={trailer} title={movie.title} />
             </section>
 
-            <ReviewsSection reviews={movie.reviews?.results ?? []} movieId={movie.id} imdbId={movie.imdb_id} title={movie.title} />
+            <ReviewsSection reviews={movie.reviews} type={movie.type} movieId={movie.id} imdbId={movie.imdbId} title={movie.title} />
           </div>
 
           <aside className="lg:sticky lg:top-8 lg:self-start">
-            <StreamingProviders region={region} title={movie.title} />
+            <StreamingProviders region={movie.region} title={movie.title} />
           </aside>
         </div>
       </div>
